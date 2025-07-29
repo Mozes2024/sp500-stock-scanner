@@ -6,4 +6,4 @@ ta
 requests
 openpyxl
 lxml
-setuptools
+numpy
