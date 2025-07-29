@@ -6,7 +6,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="🤖 Mozes Super-AI Scanner", layout="wide")
-st.title("🤖 Mozes Super-AI Scanner [DEBUG MODE]")
+st.title("🤖 Mozes Super-AI Scanner [FIXED INDICATORS]")
 
 @st.cache_data(ttl=86400)
 def load_sp500():
@@ -26,9 +26,7 @@ def fetch_tipranks_data(ticker):
             diff = round(((target - price) / price) * 100, 2) if price else None
             return data.get("smartScore"), data.get("analystConsensus"), diff
         return None, None, None
-    except Exception as e:
-        debug_info.append(f"{symbol} skipped - exception: {type(e).__name__} - {e}")
-        return None, debug_info
+    except:
         return None, None, None
 
 def scan_symbol(row, min_score):
@@ -42,19 +40,24 @@ def scan_symbol(row, min_score):
             debug_info.append(f"{symbol} skipped - insufficient data")
             return None, debug_info
 
+        # Assure 1D columns
+        df["Open"] = df["Open"].squeeze()
+        df["High"] = df["High"].squeeze()
+        df["Low"] = df["Low"].squeeze()
+        df["Close"] = df["Close"].squeeze()
+        df["Volume"] = df["Volume"].squeeze()
+
         df = ta.add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume")
-        close = df['Close'].iloc[-1]
+        close = df["Close"].iloc[-1]
         score = 0
         signals = []
 
+        # Check necessary indicators
         if pd.isna(df['trend_ema_fast'].iloc[-1]) or pd.isna(df['trend_ema_slow'].iloc[-1]):
-            debug_info.append(f"{symbol} skipped - missing EMA values")
+            debug_info.append(f"{symbol} skipped - missing EMA")
             return None, debug_info
-        if pd.isna(df['momentum_rsi'].iloc[-1]):
-            debug_info.append(f"{symbol} skipped - missing RSI")
-            return None, debug_info
-        if pd.isna(df['trend_macd'].iloc[-1]):
-            debug_info.append(f"{symbol} skipped - missing MACD")
+        if pd.isna(df['momentum_rsi'].iloc[-1]) or pd.isna(df['trend_macd'].iloc[-1]):
+            debug_info.append(f"{symbol} skipped - missing RSI/MACD")
             return None, debug_info
 
         if close > df['trend_ema200'].iloc[-1]:
@@ -106,8 +109,6 @@ def scan_symbol(row, min_score):
         }, debug_info
     except Exception as e:
         debug_info.append(f"{symbol} skipped - exception: {type(e).__name__} - {e}")
-        return None, debug_info
-        debug_info.append(f"{symbol} skipped - exception occurred")
         return None, debug_info
 
 @st.cache_data
