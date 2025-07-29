@@ -126,21 +126,22 @@ def get_tipranks_data(symbol):
             tipranks_data["AnalystConsensus"] = analyst_data.get('consensus', 'לא זמין')
 
             price_target_obj = analyst_data.get('priceTarget', {})
-            current_price = price_target_obj.get('price', np.nan) # Current price from TipRanks
+            current_price_from_tipranks = price_target_obj.get('price', np.nan) # Current price from TipRanks
             target_price = price_target_obj.get('target', np.nan)
             
-            if pd.notna(current_price) and pd.notna(target_price) and current_price != 0:
-                price_target_percentage = ((target_price - current_price) / current_price) * 100
+            # Use current_price_from_tipranks for price target calculation if available, otherwise rely on yfinance later
+            if pd.notna(current_price_from_tipranks) and pd.notna(target_price) and current_price_from_tipranks != 0:
+                price_target_percentage = ((target_price - current_price_from_tipranks) / current_price_from_tipranks) * 100
                 tipranks_data["PriceTarget %↑"] = price_target_percentage
 
     except requests.exceptions.RequestException as e:
-        # print(f"TipRanks data fetch failed for {symbol}: {e}")
+        # print(f"TipRanks data fetch failed for {symbol}: {e}") # Debugging
         pass # Fail silently for TipRanks data
     except json.JSONDecodeError as e:
-        # print(f"TipRanks JSON decode failed for {symbol}: {e}")
+        # print(f"TipRanks JSON decode failed for {symbol}: {e}") # Debugging
         pass
     except Exception as e:
-        # print(f"General error fetching TipRanks for {symbol}: {e}")
+        # print(f"General error fetching TipRanks for {symbol}: {e}") # Debugging
         pass
     return tipranks_data
 
@@ -203,59 +204,67 @@ def get_stock_data(symbol, start_date, end_date):
         matching_signals = 0 # מונה לאותות שוריים
 
         # 1. מגמה: מחיר מעל ממוצעים נעים
+        # מחיר מעל SMA20 (טווח קצר)
         if pd.notna(current_price) and pd.notna(sma20) and current_price > sma20:
             ai_score += 10
             matching_signals += 1
+        # מחיר מעל SMA50 (טווח בינוני)
         if pd.notna(current_price) and pd.notna(sma50) and current_price > sma50:
             ai_score += 15
             matching_signals += 1
+        # מחיר מעל SMA200 (טווח ארוך - מגמה חזקה)
         if pd.notna(current_price) and pd.notna(sma200) and current_price > sma200:
             ai_score += 20
             matching_signals += 1
         
-        # 2. RSI: לא בקניית יתר (מתחת ל-70)
+        # 2. RSI: לא בקניית יתר (מתחת ל-70) וגם לא במכירת יתר (מעל 30)
         if pd.notna(rsi):
-            if rsi < 70 and rsi > 30: # לא בקניית יתר ולא במכירת יתר
+            if rsi < 70 and rsi > 30: # מצב מאוזן
                 ai_score += 10
                 matching_signals += 1
             elif rsi <= 30: # מכירת יתר, פוטנציאל לתיקון עולה
                 ai_score += 5 # פחות חזק אבל עדיין חיובי
                 matching_signals += 1
         
-        # 3. MACD: חוצה מעל קו האות או חיובי
+        # 3. MACD: חוצה מעל קו האות (MACDH חיובי) או ש-MACD עצמו חיובי
         if pd.notna(macd) and pd.notna(macdh):
-            if macd > 0 and macdh > 0: # MACD חיובי ומתחזק
+            if macdh > 0: # MACD היסטוגרמה חיובית - מומנטום עולה
                 ai_score += 15
                 matching_signals += 1
-            elif macdh > 0: # MACD הולך ומתחזק (קרוס אפ או חיובי)
+            elif macd > 0: # MACD מעל קו האפס - מגמה חיובית
                 ai_score += 10
                 matching_signals += 1
         
-        # 4. Bollinger Bands: מחיר קרוב לתחתון או חצה למעלה מהתחתון (אות קנייה)
-        if pd.notna(current_price) and pd.notna(bb_lower):
-            if current_price > bb_lower and current_price < bb_middle: # מחיר חוזר מטה-בולר
+        # 4. Bollinger Bands: מחיר חצה למעלה מהתחתון או קרוב לתחתון (אות קנייה)
+        if pd.notna(current_price) and pd.notna(bb_lower) and pd.notna(bb_middle):
+            if current_price > bb_lower and current_price < bb_middle: # מחיר חוזר מטה-בולר, מומנטום חיובי
+                ai_score += 5
+                matching_signals += 1
+            elif current_price > bb_middle and current_price < bb_upper: # מחיר מעל האמצע, מומנטום ממשיך
                 ai_score += 5
                 matching_signals += 1
         
-        # 5. ADX: מגמה חזקה (מעל 25)
-        if pd.notna(adx) and adx > 25:
-            ai_score += 10
-            # מגמה חזקה אינה בהכרח שורית, אבל מראה כיוון ברור. נחשב אות חיובי אם השאר שורי.
-            # נבדוק את הכיוון על בסיס שינוי 20 יום
-            if pd.notna(change_20d) and change_20d > 0:
+        # 5. ADX: מגמה חזקה (מעל 25) ובכיוון חיובי (DI+ גבוה מ-DI-)
+        if pd.notna(adx):
+            # ADX מבטא חוזק מגמה, לא כיוון. נבדוק אם המגמה החזקה היא עלייה
+            if adx > 25 and df_ta['DMP_14'].iloc[-1] > df_ta['DMN_14'].iloc[-1]: # ADX חזק ו-DI+ מעל DI-
+                ai_score += 10
                 matching_signals += 1
         
-        # 6. שינוי ב-20 יום (כפי שהיה קודם)
+        # 6. שינוי חיובי ב-20 יום
         if pd.notna(change_20d) and change_20d > 0:
-            ai_score += (min(change_20d, 20) / 20) * 10 # עד 10 נקודות על שינוי חיובי
+            ai_score += (min(change_20d, 20) / 20) * 10 # עד 10 נקודות על שינוי חיובי, ככל שעלה יותר
             matching_signals += 1
         
-        # 7. נפח מסחר (כפי שהיה קודם)
+        # 7. נפח מסחר גבוה יחסית לממוצע (מעל ממוצע או סימני הצטברות)
+        # נניח שאם הנפח הנוכחי גבוה מהממוצע, זה סימן חיובי
+        # זה דורש גישה לנפח האחרון, אז נשתמש בממוצע הנפח בלבד כאינדיקטור ל liquidity / עניין
         if average_volume > 0:
-            volume_factor = min(10, average_volume / 1_000_000)
+            volume_factor = min(10, average_volume / 1_000_000) # נקודות לפי גודל נפח
             ai_score += volume_factor * 2 # עד 20 נקודות
             if volume_factor > 1: # רק אם יש נפח משמעותי
                 matching_signals += 1
+
 
         # לוודא שהציון נשאר בטווח 0-100
         ai_score = max(0, min(100, ai_score))
@@ -281,7 +290,7 @@ def get_stock_data(symbol, start_date, end_date):
             "Historical Data": history # שמירת הנתונים ההיסטוריים לגרפים
         }
     except Exception as e:
-        # print(f"Error fetching data for {symbol}: {e}")
+        # st.error(f"שגיאה באחזור נתונים עבור {symbol}: {e}") # Debugging for specific stock errors
         return None
 
 # פונקציית סריקה ראשית המשתמשת ב-st.status
@@ -293,7 +302,7 @@ def run_scanner_with_status(symbols, start_date, end_date):
     total_symbols = len(symbols)
     results = []
     
-    max_workers = min(15, total_symbols)
+    max_workers = min(15, total_symbols) # הגבלת מספר העובדים כדי לא להעמיס
     
     with st.status("מתחיל סריקה...", expanded=True) as status_container:
         status_text = st.empty()
@@ -336,7 +345,7 @@ today = datetime.now().date()
 default_start_date = today - timedelta(days=30)
 date_range_option = st.sidebar.selectbox(
     "בחר טווח תאריכים:",
-    ["חודש אחרון", "3 חודשים אחרונים", "6 חודשים אחרונים", "שנה אחרונה", "הכל (מקסימום זמין)"],
+    ["חודש אחרון", "3 חודשים אחרונים", "6 חודשים אחרונים", "שנה אחרונה", "3 שנים אחרונות", "הכל (מקסימום זמין)"],
     index=0
 )
 
@@ -348,6 +357,8 @@ elif date_range_option == "6 חודשים אחרונים":
     start_date = today - timedelta(days=180)
 elif date_range_option == "שנה אחרונה":
     start_date = today - timedelta(days=365)
+elif date_range_option == "3 שנים אחרונות":
+    start_date = today - timedelta(days=365 * 3) # Added 3 years option
 elif date_range_option == "הכל (מקסימום זמין)":
     start_date = datetime(1990, 1, 1).date()
 
@@ -361,6 +372,7 @@ if specific_symbols_input:
     symbols_to_scan = [s for s in specific_symbols if s in SP500_SYMBOLS]
     if not symbols_to_scan:
         st.sidebar.warning("אף אחד מהסמלים שהוזנו אינו ברשימת S&P 500. וודא איות נכון.")
+        symbols_to_scan = [] # Ensure it's empty if no valid symbols
 else:
     symbols_to_scan = SP500_SYMBOLS
 
@@ -370,7 +382,7 @@ current_settings_hash = hashlib.md5(json.dumps({
     "symbols_to_scan": sorted(symbols_to_scan)
 }).encode()).hexdigest()
 
-should_scan_button_be_enabled = not st.session_state.is_scanning
+should_scan_button_be_enabled = not st.session_state.is_scanning and len(symbols_to_scan) > 0
 button_label = "התחל סריקה חדשה"
 if st.session_state.is_scanning:
     button_label = "הסריקה פועלת..."
@@ -468,10 +480,6 @@ if st.session_state.scanner_results:
         st.subheader("📈 ניתוח מניה בודדת")
         
         # בחירת מניה מהטבלה
-        # כדי לאפשר בחירה ישירה מה-dataframe, נשתמש בטריק של Streamlit:
-        # Streamlit לא תומך בבחירת שורה ישירה ב-dataframe שמוצג בצורה פשוטה כמו st.dataframe
-        # הפתרון הנפוץ הוא להשתמש ב-selectbox עם הסימבולים או להשתמש ב-st.experimental_data_editor עם selection_mode.
-        # בינתיים, נשתמש ב-selectbox.
         
         selected_symbol_for_chart = st.selectbox(
             "בחר מניה להצגת גרף וקישורים:",
@@ -529,7 +537,7 @@ if st.session_state.scanner_results:
                 tipranks_url = stock_data_for_chart.get("TipRanks_URL", f"https://www.tipranks.com/stocks/{selected_symbol_for_chart}")
                 st.markdown(f"[🔗 TipRanks]({tipranks_url})")
             with col_links_2:
-                tradingview_url = f"https://il.tradingview.com/chart/?symbol={selected_symbol_for_chart}" # אין צורך ב-SWXo0urZ קבוע
+                tradingview_url = f"https://il.tradingview.com/chart/?symbol={selected_symbol_for_chart}"
                 st.markdown(f"[🔗 TradingView]({tradingview_url})")
             with col_links_3:
                 investing_url = f"https://il.investing.com/search?q={selected_symbol_for_chart}"
