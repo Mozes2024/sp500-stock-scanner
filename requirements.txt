@@ -5,6 +5,6 @@ pandas_ta
 requests
 openpyxl
 lxml
-numpy
+numpy==1.26.4
 plotly
 setuptools
