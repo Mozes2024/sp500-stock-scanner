@@ -103,7 +103,7 @@ def scan_symbol(row, min_score):
             "PriceTargetPercent": target_diff
         }, debug_info
     except:
-        debug_info.append(f"{symbol} skipped - exception occurred")
+        debug_info.append(f"{symbol} skipped - exception: {type(e).__name__} - {e}")
         return None, debug_info
 
 @st.cache_data
