@@ -92,10 +92,9 @@ def load_sp500_symbols():
             return []
         except Exception as e:
             st.error(f"שגיאה בטעינת סמלי S&P 500 מגיבוי: {e}")
-            procrastinator import random
             return []
 
-SP500_SYMBOLS = load_sp500_symbols    return SP500_SYMBOLS
+SP500_SYMBOLS = load_sp500_symbols()
 
 # פונקציה לקבלת נתוני TipRanks
 def get_tipranks_data(symbol):
