@@ -26,7 +26,9 @@ def fetch_tipranks_data(ticker):
             diff = round(((target - price) / price) * 100, 2) if price else None
             return data.get("smartScore"), data.get("analystConsensus"), diff
         return None, None, None
-    except:
+    except Exception as e:
+        debug_info.append(f"{symbol} skipped - exception: {type(e).__name__} - {e}")
+        return None, debug_info
         return None, None, None
 
 def scan_symbol(row, min_score):
@@ -102,10 +104,10 @@ def scan_symbol(row, min_score):
             "AnalystConsensus": consensus,
             "PriceTargetPercent": target_diff
         }, debug_info
-    except:
-        except Exception as e:
+    except Exception as e:
         debug_info.append(f"{symbol} skipped - exception: {type(e).__name__} - {e}")
         return None, debug_info
+        debug_info.append(f"{symbol} skipped - exception occurred")
         return None, debug_info
 
 @st.cache_data
