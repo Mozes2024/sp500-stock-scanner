@@ -93,7 +93,7 @@ def scan_stocks(min_score, sector_filter):
                     "Matching Signals": ", ".join(signals),
                     "SmartScore": smart,
                     "AnalystConsensus": consensus,
-                    "PriceTarget %鈫?: target_diff
+                    "PriceTargetPercent": target_diff
                 })
         except Exception as e:
             continue
@@ -122,7 +122,7 @@ if not df_result.empty:
             st.markdown(f"**讛转讗诪讜转:** {row['Matching Signals']}")
             st.markdown(f"**TipRanks SmartScore:** {row['SmartScore']}")
             st.markdown(f"**讛诪诇爪转 讗谞诇讬住讟讬诐:** {row['AnalystConsensus']}")
-            st.markdown(f"**驻注专 讬注讚 鈫?** {row['PriceTarget %鈫?]}%")
+            st.markdown(f"**驻注专 讬注讚 鈫?** {row['PriceTargetPercent']}%")
             st.markdown("**馃敆 拽讬砖讜专讬诐 讞讬爪讜谞讬讬诐:**")
             st.markdown(f"[馃搱 TipRanks](https://www.tipranks.com/stocks/{row['Symbol']})")
             st.markdown(f"[馃搳 TradingView](https://il.tradingview.com/chart/SWXo0urZ/?symbol={row['Symbol']})")
