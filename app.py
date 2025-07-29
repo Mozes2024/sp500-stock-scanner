@@ -100,7 +100,6 @@ def scan_stocks_parallel(min_score, sector_filter):
 
     results = []
 debug_logs = []
-    print(f"Scanning {len(sp500)} stocks with min_score={min_score}")
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(scan_symbol, row, min_score) for _, row in sp500.iterrows()]
         for future in futures:
