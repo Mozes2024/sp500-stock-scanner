@@ -1,10 +1,10 @@
 streamlit
 yfinance
 pandas
+numpy
 pandas_ta
 ta
 requests
 openpyxl
 lxml
-numpy
 setuptools
