@@ -6,8 +6,7 @@ import plotly.express as px
 import numpy as np
 from datetime import datetime, timedelta
 import time
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor # Removed threading import as it's not needed directly with st.status
 import json
 import hashlib
 
@@ -22,10 +21,8 @@ st.set_page_config(
 # אתחול מצב סשן לנתונים קבועים
 if 'scanner_results' not in st.session_state:
     st.session_state.scanner_results = []
-if 'scan_progress' not in st.session_state:
-    st.session_state.scan_progress = 0
-if 'scan_status' not in st.session_state:
-    st.session_state.scan_status = "מוכן לסריקה"
+if 'scan_status_message' not in st.session_state: # שינוי שם כדי לא להתנגש עם st.status
+    st.session_state.scan_status_message = "מוכן לסריקה"
 if 'last_scan_time' not in st.session_state:
     st.session_state.last_scan_time = None
 if 'scan_settings_hash' not in st.session_state:
@@ -61,6 +58,9 @@ st.markdown("""
     .stTextInput>div>div>input {
         background-color: #f0f2f6;
     }
+    .stDataFrame { /* Adjusting DataFrame display */
+        font-size: 0.85em; /* Smaller font for table */
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,7 +69,7 @@ st.markdown("""
 def load_sp500_symbols():
     try:
         # ננסה לטעון מהאינטרנט
-        table = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
+        table = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P%20500_companies')
         df = table[0]
         symbols = df['Symbol'].tolist()
         
@@ -105,7 +105,7 @@ def get_stock_data(symbol, start_date, end_date):
         if history.empty:
             return None
         
-        # קבלת סקטור ותעשייה (עשוי לקחת זמן)
+        # קבלת סקטור ותעשייה
         info = ticker.info
         sector = info.get('sector', 'לא ידוע')
         industry = info.get('industry', 'לא ידוע')
@@ -115,81 +115,87 @@ def get_stock_data(symbol, start_date, end_date):
         if len(history) >= 20:
             change_20d = ((history['Close'].iloc[-1] - history['Close'].iloc[-20]) / history['Close'].iloc[-20]) * 100
         else:
-            change_20d = np.nan # או 0, תלוי איך רוצים להתייחס
+            change_20d = np.nan
             
         # נפח ממוצע
         average_volume = history['Volume'].mean()
 
-        # "AI Score" - דוגמה לחישוב ציון. ניתן לשפר!
-        # כרגע: ציון גבוה יותר למניות עם שינוי חיובי חזק ונפח מסחר גבוה.
-        # יש לשקול הוספת אינדיקטורים נוספים כאן!
+        # "AI Score" - דוגמה לחישוב ציון.
         ai_score = 0
+        current_price = history['Close'].iloc[-1]
+        
+        # משקל לשינוי 20 יום
         if not np.isnan(change_20d):
-            ai_score += change_20d * 0.5 # תורם 50% מהשינוי
+            ai_score += change_20d * 0.7 # תורם יותר
+
+        # משקל לשינוי 5 ימים (לרגישות קצרה)
+        if len(history) >= 5:
+            change_5d = ((history['Close'].iloc[-1] - history['Close'].iloc[-5]) / history['Close'].iloc[-5]) * 100
+            if not np.isnan(change_5d):
+                ai_score += change_5d * 0.3 # תורם פחות מ-20 יום
+        
+        # משקל לנפח מסחר ממוצע (עוצמה)
         if average_volume > 0:
-            ai_score += (average_volume / 1_000_000_000) * 10 # תורם 10 נקודות לכל מיליארד נפח
+            # נרמול נפח: כמה פעמים הנפח הממוצע גדול מ-X (למשל, מיליון מניות)
+            volume_factor = min(10, average_volume / 1_000_000) # הגבל ל-10 כדי לא לתת משקל יתר
+            ai_score += volume_factor * 2 # תורם נקודות על סמך נפח
             
-        # נרמול הציון לטווח הגיוני יותר, למשל 0-100 או לפי התפלגות
-        # (כרגע לא מנורמל, סתם דוגמה לחישוב ראשוני)
-        ai_score = max(0, ai_score) # כדי שלא יהיו ציונים שליליים מה-AI Score
+        # להוסיף ציון בסיס כדי לא להתחיל מאפס לגמרי
+        ai_score += 50 # ציון בסיס
+
+        # לוודא שהציון נשאר בטווח הגיוני (לדוגמה, 0-100)
+        ai_score = max(0, min(100, ai_score)) # מגביל את הציון בין 0 ל-100
 
         return {
             "Symbol": symbol,
             "Company": long_name,
             "Sector": sector,
             "Industry": industry,
-            "Current Price": history['Close'].iloc[-1],
+            "Current Price": current_price,
             "20D Change %": change_20d,
             "Average Volume": average_volume,
             "AI Score": ai_score
         }
     except Exception as e:
-        # st.error(f"שגיאה באחזור נתונים עבור {symbol}: {e}") # לא להציג שגיאות למשתמש עבור כל מניה
+        # עדיף לרשום שגיאות ללוג פנימי ולא למשתמש
+        # print(f"Error fetching data for {symbol}: {e}")
         return None
 
-# פונקציית סריקה המותאמת ל-Streamlit
-def run_scanner(symbols, start_date, end_date, progress_bar, status_text):
+# פונקציית סריקה ראשית המשתמשת ב-st.status
+def run_scanner_with_status(symbols, start_date, end_date):
     st.session_state.is_scanning = True
     st.session_state.scanner_results = []
-    st.session_state.scan_progress = 0
-    st.session_state.scan_status = "מתחיל סריקה..."
-
+    
     total_symbols = len(symbols)
     results = []
     
-    # השתמש בפרוגרס בר מחוץ ל-thread כדי ש-streamlit יוכל לעדכן אותו
-    # הפונקציה תעדכן את st.session_state.scan_progress
-    
     # הגדל את מספר ה-workers אם יש לך הרבה מניות
-    max_workers = min(10, total_symbols) # הגבל ל-10 או למספר המניות
+    max_workers = min(15, total_symbols) # הגבל ל-15 או למספר המניות
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_symbol = {executor.submit(get_stock_data, symbol, start_date, end_date): symbol for symbol in symbols}
+    with st.status("מתחיל סריקה...", expanded=True) as status_container:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_symbol = {executor.submit(get_stock_data, symbol, start_date, end_date): symbol for symbol in symbols}
+            
+            for i, future in enumerate(as_completed(future_to_symbol)):
+                symbol = future_to_symbol[future]
+                try:
+                    data = future.result()
+                    if data:
+                        results.append(data)
+                except Exception as exc:
+                    status_container.write(f"אזהרה: {symbol} יצר חריגה ולא נסרק. ייתכן שהנתונים אינם זמינים או שיש בעיית תקשורת.")
+                
+                # עדכון התקדמות בתוך הסטטוס
+                progress_percent = (i + 1) / total_symbols
+                status_container.progress(progress_percent, text=f"סורק מניות... {i+1}/{total_symbols} ({int(progress_percent * 100)}%)")
         
-        for i, future in enumerate(as_completed(future_to_symbol)):
-            symbol = future_to_symbol[future]
-            try:
-                data = future.result()
-                if data:
-                    results.append(data)
-            except Exception as exc:
-                # st.warning(f'{symbol} יצר חריגה: {exc}') # לא להציג למשתמש עבור כל מניה
-                pass # לטפל בשגיאות בשקט, או לרשום ללוג פנימי
-            
-            # עדכון התקדמות
-            st.session_state.scan_progress = (i + 1) / total_symbols
-            st.session_state.scan_status = f"סורק מניות... {i+1}/{total_symbols} ({int(st.session_state.scan_progress * 100)}%)"
-            
-            # Streamlit צריך "לדעת" שמשהו השתנה כדי לרנדר מחדש.
-            # שימוש ב-st.rerun() יגרום ללולאה אינסופית או בעיות אחרות בתוך thread.
-            # במקום זאת, נעדכן את ה-UI חיצונית ע"י מנגנון אחר.
-            # פה אנחנו רק מעדכנים את ה-session_state, וה-UI יקרא אותו חיצונית.
-            
+        status_container.update(label="סריקה הושלמה!", state="complete", expanded=False)
+
     st.session_state.scanner_results = results
     st.session_state.last_scan_time = datetime.now()
-    st.session_state.scan_status = "סריקה הושלמה!"
-    st.session_state.is_scanning = False # הסריקה הסתיימה
-    st.session_state.scan_progress = 1.0 # לוודא שהפרוגרס בר מלא
+    st.session_state.scan_status_message = "סריקה הושלמה!"
+    st.session_state.is_scanning = False
+
 
 # כותרת האפליקציה
 st.title("🚀 סורק מניות S&P 500 מבוסס AI")
@@ -222,29 +228,15 @@ end_date = today
 
 st.sidebar.write(f"**טווח נבחר:** {start_date.strftime('%Y-%m-%d')} עד {end_date.strftime('%Y-%m-%d')}")
 
-# סינון לפי סקטור
-all_sectors = sorted(list(set([s['Sector'] for s in st.session_state.scanner_results if 'Sector' in s and s['Sector'] != 'לא ידוע'])))
-selected_sectors = st.sidebar.multiselect("סנן לפי סקטור:", all_sectors, default=all_sectors)
-
-# סינון לפי ציון AI מינימלי
-min_ai_score = st.sidebar.slider("ציון AI מינימלי:", 0, 100, 50)
-
-# סינון לפי שינוי באחוזים
-min_change_percent = st.sidebar.slider("שינוי מינימלי ב-20 יום (%):", -50, 50, 0)
-
-# סינון לפי נפח מסחר ממוצע
-min_volume = st.sidebar.number_input("נפח מסחר ממוצע מינימלי:", min_value=0, value=1000000)
-
 # שטח טקסט לסמלים ספציפיים
 specific_symbols_input = st.sidebar.text_area("סמלים ספציפיים (הפרד בפסיק, אופציונלי):", value="")
 if specific_symbols_input:
     specific_symbols = [s.strip().upper() for s in specific_symbols_input.split(',') if s.strip()]
     symbols_to_scan = [s for s in specific_symbols if s in SP500_SYMBOLS]
     if not symbols_to_scan:
-        st.sidebar.warning("אף אחד מהסמלים שהוזנו אינו ברשימת S&P 500.")
+        st.sidebar.warning("אף אחד מהסמלים שהוזנו אינו ברשימת S&P 500. וודא איות נכון.")
 else:
     symbols_to_scan = SP500_SYMBOLS
-
 
 # יצירת Hash להגדרות הסריקה
 current_settings_hash = hashlib.md5(json.dumps({
@@ -253,50 +245,36 @@ current_settings_hash = hashlib.md5(json.dumps({
     "symbols_to_scan": sorted(symbols_to_scan) # מיון כדי להבטיח עקביות ב-hash
 }).encode()).hexdigest()
 
-# בדיקה האם נדרש סריקה מחדש
-should_scan = False
-if st.button("התחל סריקה חדשה" if not st.session_state.is_scanning else "הסריקה פועלת...", disabled=st.session_state.is_scanning):
-    # הפעלת הסריקה ב-thread נפרד
-    if not st.session_state.is_scanning:
-        st.session_state.is_scanning = True
-        # st.session_state.scan_status = "מתחיל סריקה..." # כבר מוגדר ב run_scanner
-        st.session_state.scan_progress = 0
-        
-        # Streamlit לא מאפשר עדכון UI מתוך Thread ישירות.
-        # הפתרון המקובל הוא לעדכן את st.session_state ב-thread
-        # ולגרום ל-streamlit לטעון את העמוד מחדש באופן מחזורי או ע"י אינטראקציה של המשתמש.
-        # לצורך חיווי פרוגרס בר רציף, נשתמש בלולאה ב-main thread.
-        
-        # הפעל את הפונקציה ב-thread:
-        threading.Thread(target=run_scanner, args=(symbols_to_scan, start_date, end_date, None, None)).start()
-        
-        # חיווי התקדמות מיד לאחר לחיצה על הכפתור
-        st.session_state.scan_status = "מבצע סריקה..."
-        # st.rerun() # לא נשתמש ב-rerun כאן כדי לא לגרום ללולאה אינסופית
-
-# הצגת חיווי ההתקדמות והסטטוס
+# בדיקה האם נדרש סריקה מחדש וחישוב הלחצן
+should_scan_button_be_enabled = not st.session_state.is_scanning
+button_label = "התחל סריקה חדשה"
 if st.session_state.is_scanning:
-    st.info(f"**סטטוס:** {st.session_state.scan_status}")
-    st.progress(st.session_state.scan_progress, text=f"{int(st.session_state.scan_progress * 100)}%")
-    # Streamlit לא מתעדכן אוטומטית מ-threads.
-    # אנחנו צריכים לגרום ל-Streamlit לרנדר מחדש כדי להציג את התקדמות.
-    # טריק נפוץ הוא להשתמש ב-st.empty() וב-time.sleep()
-    # או פשוט להסתמך על העדכונים של session_state והרנדור מחדש עם כל אינטראקציה (כמו לחיצה על כפתור אחר,
-    # או הגדרה של Streamlit Cloud לרענן אוטומטית את העמוד כל כמה שניות אם enabled).
-    # ללא st.rerun, הפרוגרס בר יתעדכן רק באינטראקציה הבאה של המשתמש.
-    # אם ברצונך עדכון *רציף* ללא לחיצה, נצטרך מנגנון קצת יותר מורכב.
-    # בשלב זה, החיווי יופיע ויתעדכן כאשר הסריקה תסתיים.
-    # או כשמתבצעת אינטראקציה כלשהי עם ה-UI.
+    button_label = "הסריקה פועלת..."
+elif st.session_state.last_scan_time and st.session_state.scan_settings_hash == current_settings_hash:
+    button_label = "רענן סריקה (נתונים קיימים)" # אם ההגדרות זהות, רענן את הקיימים
     
-    # פתרון פשוט יחסית לעדכון רציף (במחיר של "לולאת רינדור" בזמן הסריקה)
-    time.sleep(0.5) # המתן מעט כדי לאפשר ל-thread להתקדם
-    st.rerun() # גורם לרנדור מחדש של האפליקציה, מה שיציג את ההתקדמות המעודכנת
+if st.button(button_label, disabled=not should_scan_button_be_enabled):
+    if not st.session_state.is_scanning:
+        # סטטוס התחלתי לפני הפעלת ה-thread
+        st.session_state.scan_status_message = "מתחיל סריקה..."
+        st.session_state.is_scanning = True
+        st.session_state.scan_settings_hash = current_settings_hash # שמור את ה-hash של ההגדרות
+        
+        # הפעלת הסריקה ב-main thread עם st.status
+        run_scanner_with_status(symbols_to_scan, start_date, end_date)
+        
+        # אין צורך ב-st.rerun() כאן, st.status מטפל בזה אוטומטית.
 
+
+# הצגת סטטוס כללי (לא הפרוגרס בר המפורט)
+if st.session_state.is_scanning:
+    st.info(f"**סטטוס:** {st.session_state.scan_status_message}")
+    # הפרוגרס בר המפורט מוצג בתוך ה-st.status, לכן לא מציגים אותו כאן שוב.
 else: # אם הסריקה לא פעילה
     if st.session_state.last_scan_time:
-        st.info(f"**סריקה אחרונה בוצעה ב:** {st.session_state.last_scan_time.strftime('%Y-%m-%d %H:%M:%S')}. **סטטוס:** {st.session_state.scan_status}")
+        st.info(f"**סריקה אחרונה בוצעה ב:** {st.session_state.last_scan_time.strftime('%Y-%m-%d %H:%M:%S')}. **סטטוס:** {st.session_state.scan_status_message}")
     else:
-        st.info("לחץ 'התחל סריקה חדשה' כדי להתחיל.")
+        st.info("כדי להתחיל, בחר את ההגדרות שלך בסרגל הצד ולחץ על 'התחל סריקה חדשה'.")
 
 
 # הצגת תוצאות הסריקה
@@ -305,19 +283,33 @@ if st.session_state.scanner_results:
 
     df_results = pd.DataFrame(st.session_state.scanner_results)
     
-    # טיפול בערכי NaN ב-20D Change % לפני סינון
-    df_results['20D Change %'] = df_results['20D Change %'].fillna(0) # למשל, למלא ב-0 או בערך אחר
+    # טיפול בערכי NaN ב-20D Change % וב-AI Score לפני סינון/הצגה
+    df_results['20D Change %'] = df_results['20D Change %'].fillna(0)
+    df_results['AI Score'] = df_results['AI Score'].fillna(0)
 
-    # יישום סינונים מהסרגל הצד
+    # **פתרון לסינון סקטורים:**
+    # רשימת הסקטורים זמינה רק אחרי שיש נתונים ב-df_results
+    all_sectors_from_data = sorted(list(set([s for s in df_results['Sector'].unique() if s != 'לא ידוע'])))
+    selected_sectors = st.sidebar.multiselect("סנן לפי סקטור:", all_sectors_from_data, default=all_sectors_from_data)
+
+    # סינון לפי ציון AI מינימלי
+    min_ai_score = st.sidebar.slider("ציון AI מינימלי:", 0, 100, 50)
+
+    # סינון לפי שינוי באחוזים
+    min_change_percent = st.sidebar.slider("שינוי מינימלי ב-20 יום (%):", -50.0, 50.0, 0.0, step=0.1) # מאפשר ערכים עשרוניים
+
+    # סינון לפי נפח מסחר ממוצע
+    min_volume = st.sidebar.number_input("נפח מסחר ממוצע מינימלי:", min_value=0, value=1000000)
+    
+    # יישום סינונים
     df_filtered = df_results[
         (df_results['AI Score'] >= min_ai_score) &
         (df_results['20D Change %'] >= min_change_percent) &
         (df_results['Average Volume'] >= min_volume)
     ]
     
-    if selected_sectors: # אם יש סקטורים נבחרים
+    if selected_sectors:
         df_filtered = df_filtered[df_filtered['Sector'].isin(selected_sectors)]
-
 
     if not df_filtered.empty:
         # מיון לפי ציון AI Score
@@ -337,7 +329,7 @@ if st.session_state.scanner_results:
         fig_scatter = px.scatter(df_filtered, x="AI Score", y="20D Change %",
                                        color="Sector", size="Average Volume", # גודל הנקודה לפי נפח
                                        title="ציון AI מול שינוי ב-20 יום (נפח לפי גודל)",
-                                       hover_data=["Symbol", "Company", "Current Price", "Average Volume"])
+                                       hover_data=["Symbol", "Company", "Current Price", "Average Volume", "Industry"])
         st.plotly_chart(fig_scatter, use_container_width=True)
 
         # גרף עמודות: ממוצע ציון AI לסקטור
@@ -347,11 +339,19 @@ if st.session_state.scanner_results:
                                 color='AI Score', color_continuous_scale=px.colors.sequential.Plasma)
         st.plotly_chart(fig_bar_sector, use_container_width=True)
 
+        # גרף עמודות: 10 המובילות לפי ציון AI
+        top_10_ai = df_filtered.head(10).sort_values(by='AI Score', ascending=True) # למיון לצורך גרף עמודות יפה
+        fig_bar_top_10 = px.bar(top_10_ai, x='AI Score', y='Company', orientation='h',
+                               title='10 המניות המובילות לפי ציון AI',
+                               color='AI Score', color_continuous_scale=px.colors.sequential.Viridis)
+        st.plotly_chart(fig_bar_top_10, use_container_width=True)
+
+
     else:
         st.warning(f"לא נמצאו מניות העומדות בקריטריונים הנבחרים. נסה לשנות את הסינון.")
         
         # הצג את ה-10 המובילות ללא קשר לסינון
-        st.subheader("🔍 10 המניות המובילות (ללא קשר לסינון)")
+        st.subheader("🔍 10 המניות המובילות (ללא סינון)")
         if not df_results.empty:
             df_top_10_all = df_results.sort_values(by="AI Score", ascending=False).head(10).reset_index(drop=True)
             st.dataframe(df_top_10_all.style.format({
@@ -385,8 +385,13 @@ if st.session_state.scanner_results:
 
     with col3:
         # סטטיסטיקות מהירות
-        st.metric("🔥 הציון הגבוה ביותר", f"{df_filtered['AI Score'].max():.2f}")
-        st.metric("📈 ממוצע שינוי 20 יום", f"{df_filtered['20D Change %'].mean():.1f}%")
+        if not df_filtered.empty:
+            st.metric("🔥 הציון הגבוה ביותר", f"{df_filtered['AI Score'].max():.2f}")
+            st.metric("📈 ממוצע שינוי 20 יום", f"{df_filtered['20D Change %'].mean():.1f}%")
+        else:
+            st.metric("🔥 הציון הגבוה ביותר", "אין נתונים")
+            st.metric("📈 ממוצע שינוי 20 יום", "אין נתונים")
+
 
 else:
     st.info("כדי להתחיל, בחר את ההגדרות שלך בסרגל הצד ולחץ על 'התחל סריקה חדשה'.")
