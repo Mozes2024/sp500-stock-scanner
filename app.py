@@ -1,10 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import pandas_ta as ta
 import plotly.graph_objects as go
 import plotly.express as px
-from plotly.subplots import make_subplots
 import numpy as np
 from datetime import datetime, timedelta
 import time
@@ -65,7 +63,62 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🚀 Mozes Super-AI Stock Scanner")
-st.markdown("### AI-Powered Technical Analysis & Market Intelligence with Multi-Threading")
+st.markdown("### AI-Powered Technical Analysis & Market Intelligence")
+
+# Technical Analysis Functions (Custom Implementation)
+def calculate_rsi(prices, window=14):
+    """Calculate RSI"""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
+def calculate_sma(prices, window):
+    """Simple Moving Average"""
+    return prices.rolling(window=window).mean()
+
+def calculate_ema(prices, span):
+    """Exponential Moving Average"""
+    return prices.ewm(span=span, adjust=False).mean()
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """MACD Calculation"""
+    ema_fast = calculate_ema(prices, fast)
+    ema_slow = calculate_ema(prices, slow)
+    macd = ema_fast - ema_slow
+    macd_signal = calculate_ema(macd, signal)
+    return macd, macd_signal
+
+def calculate_bollinger_bands(prices, window=20, num_std=2):
+    """Bollinger Bands"""
+    sma = calculate_sma(prices, window)
+    std = prices.rolling(window=window).std()
+    upper_band = sma + (std * num_std)
+    lower_band = sma - (std * num_std)
+    return upper_band, lower_band, sma
+
+def calculate_stochastic(high, low, close, k_window=14, d_window=3):
+    """Stochastic Oscillator"""
+    lowest_low = low.rolling(window=k_window).min()
+    highest_high = high.rolling(window=k_window).max()
+    k_percent = 100 * ((close - lowest_low) / (highest_high - lowest_low))
+    d_percent = k_percent.rolling(window=d_window).mean()
+    return k_percent, d_percent
+
+def calculate_atr(high, low, close, window=14):
+    """Average True Range"""
+    hl = high - low
+    hc = abs(high - close.shift())
+    lc = abs(low - close.shift())
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    return tr.rolling(window=window).mean()
+
+def calculate_obv(close, volume):
+    """On-Balance Volume"""
+    obv = (np.sign(close.diff()) * volume).fillna(0).cumsum()
+    return obv
 
 # Cache functions with longer TTL
 @st.cache_data(ttl=7200)  # Cache for 2 hours
@@ -91,7 +144,7 @@ def get_stock_volume_data(symbol):
         return 0
 
 def calculate_advanced_signals(data):
-    """Calculate advanced technical indicators"""
+    """Calculate advanced technical indicators using custom functions"""
     try:
         close = data["Close"]
         high = data["High"]
@@ -99,51 +152,53 @@ def calculate_advanced_signals(data):
         volume = data["Volume"]
         
         # Basic indicators
-        rsi = ta.rsi(close, length=14)
-        macd_df = ta.macd(close)
-        bb_df = ta.bbands(close)
-        stoch = ta.stoch(high, low, close)
-        
-        # Advanced indicators
-        adx = ta.adx(high, low, close)
-        atr = ta.atr(high, low, close)
-        obv = ta.obv(close, volume)
-        cci = ta.cci(high, low, close)
-        williams_r = ta.willr(high, low, close)
+        rsi = calculate_rsi(close)
+        macd, macd_signal = calculate_macd(close)
+        bb_upper, bb_lower, bb_middle = calculate_bollinger_bands(close)
+        stoch_k, stoch_d = calculate_stochastic(high, low, close)
         
         # Moving averages
-        sma_20 = ta.sma(close, length=20)
-        sma_50 = ta.sma(close, length=50)
-        sma_200 = ta.sma(close, length=200)
-        ema_12 = ta.ema(close, length=12)
-        ema_26 = ta.ema(close, length=26)
+        sma_20 = calculate_sma(close, 20)
+        sma_50 = calculate_sma(close, 50)
+        sma_200 = calculate_sma(close, 200)
+        ema_12 = calculate_ema(close, 12)
+        ema_26 = calculate_ema(close, 26)
+        
+        # Advanced indicators
+        atr = calculate_atr(high, low, close)
+        obv = calculate_obv(close, volume)
+        
+        # Price momentum
+        momentum_5 = close / close.shift(5) - 1
+        momentum_10 = close / close.shift(10) - 1
         
         return {
-            'RSI': rsi.iloc[-1] if not rsi.empty else 50,
-            'MACD': macd_df['MACD_12_26_9'].iloc[-1] if not macd_df.empty else 0,
-            'MACD_Signal': macd_df['MACDs_12_26_9'].iloc[-1] if not macd_df.empty else 0,
-            'BB_Upper': bb_df['BBU_5_2.0'].iloc[-1] if not bb_df.empty else close.iloc[-1],
-            'BB_Lower': bb_df['BBL_5_2.0'].iloc[-1] if not bb_df.empty else close.iloc[-1],
-            'Stoch_K': stoch['STOCHk_14_3_3'].iloc[-1] if not stoch.empty else 50,
-            'ADX': adx['ADX_14'].iloc[-1] if not adx.empty else 25,
-            'ATR': atr.iloc[-1] if not atr.empty else 1,
-            'OBV': obv.iloc[-1] if not obv.empty else 0,
-            'CCI': cci.iloc[-1] if not cci.empty else 0,
-            'WilliamsR': williams_r.iloc[-1] if not williams_r.empty else -50,
-            'SMA_20': sma_20.iloc[-1] if not sma_20.empty else close.iloc[-1],
-            'SMA_50': sma_50.iloc[-1] if not sma_50.empty else close.iloc[-1],
-            'SMA_200': sma_200.iloc[-1] if not sma_200.empty else close.iloc[-1],
-            'EMA_12': ema_12.iloc[-1] if not ema_12.empty else close.iloc[-1],
-            'EMA_26': ema_26.iloc[-1] if not ema_26.empty else close.iloc[-1],
+            'RSI': rsi.iloc[-1] if not rsi.empty and not pd.isna(rsi.iloc[-1]) else 50,
+            'MACD': macd.iloc[-1] if not macd.empty and not pd.isna(macd.iloc[-1]) else 0,
+            'MACD_Signal': macd_signal.iloc[-1] if not macd_signal.empty and not pd.isna(macd_signal.iloc[-1]) else 0,
+            'BB_Upper': bb_upper.iloc[-1] if not bb_upper.empty and not pd.isna(bb_upper.iloc[-1]) else close.iloc[-1],
+            'BB_Lower': bb_lower.iloc[-1] if not bb_lower.empty and not pd.isna(bb_lower.iloc[-1]) else close.iloc[-1],
+            'Stoch_K': stoch_k.iloc[-1] if not stoch_k.empty and not pd.isna(stoch_k.iloc[-1]) else 50,
+            'ATR': atr.iloc[-1] if not atr.empty and not pd.isna(atr.iloc[-1]) else 1,
+            'OBV': obv.iloc[-1] if not obv.empty and not pd.isna(obv.iloc[-1]) else 0,
+            'SMA_20': sma_20.iloc[-1] if not sma_20.empty and not pd.isna(sma_20.iloc[-1]) else close.iloc[-1],
+            'SMA_50': sma_50.iloc[-1] if not sma_50.empty and not pd.isna(sma_50.iloc[-1]) else close.iloc[-1],
+            'SMA_200': sma_200.iloc[-1] if not sma_200.empty and not pd.isna(sma_200.iloc[-1]) else close.iloc[-1],
+            'EMA_12': ema_12.iloc[-1] if not ema_12.empty and not pd.isna(ema_12.iloc[-1]) else close.iloc[-1],
+            'EMA_26': ema_26.iloc[-1] if not ema_26.empty and not pd.isna(ema_26.iloc[-1]) else close.iloc[-1],
+            'Momentum_5': momentum_5.iloc[-1] if not momentum_5.empty and not pd.isna(momentum_5.iloc[-1]) else 0,
+            'Momentum_10': momentum_10.iloc[-1] if not momentum_10.empty and not pd.isna(momentum_10.iloc[-1]) else 0,
         }
     except Exception as e:
         # Return default values if calculation fails
-        return {key: 0 for key in ['RSI', 'MACD', 'MACD_Signal', 'BB_Upper', 'BB_Lower', 'Stoch_K', 
-                                  'ADX', 'ATR', 'OBV', 'CCI', 'WilliamsR', 'SMA_20', 'SMA_50', 
-                                  'SMA_200', 'EMA_12', 'EMA_26']}
+        return {
+            'RSI': 50, 'MACD': 0, 'MACD_Signal': 0, 'BB_Upper': 0, 'BB_Lower': 0, 
+            'Stoch_K': 50, 'ATR': 1, 'OBV': 0, 'SMA_20': 0, 'SMA_50': 0, 
+            'SMA_200': 0, 'EMA_12': 0, 'EMA_26': 0, 'Momentum_5': 0, 'Momentum_10': 0
+        }
 
 def calculate_ai_score(close_price, indicators):
-    """Advanced AI scoring system"""
+    """Enhanced AI scoring system"""
     score = 0
     signals = []
     
@@ -182,17 +237,26 @@ def calculate_ai_score(close_price, indicators):
         if indicators['BB_Lower'] < close_price < indicators['BB_Upper']:
             score += 1
             signals.append("BB Normal Range")
+        elif close_price <= indicators['BB_Lower']:
+            score += 1
+            signals.append("BB Oversold")
         
         # Stochastic (0-1 points)
         if 20 <= indicators['Stoch_K'] <= 80:
             score += 1
             signals.append("Stoch Healthy")
-        
-        # ADX Trend Strength (0-1 points)
-        if indicators['ADX'] > 25:
+        elif indicators['Stoch_K'] < 20:
             score += 1
-            signals.append("Strong Trend")
-    except:
+            signals.append("Stoch Oversold")
+        
+        # Momentum Analysis (0-1 points)
+        if indicators['Momentum_5'] > 0.02:  # 2% momentum
+            score += 1
+            signals.append("Strong Momentum")
+        elif indicators['Momentum_5'] > 0:
+            signals.append("Positive Momentum")
+        
+    except Exception as e:
         pass
     
     return min(score, 10), signals
@@ -220,11 +284,15 @@ def analyze_single_stock(symbol, period, ticker_info_dict):
         # Price change calculations
         price_change_1d = ((close_price - data["Close"].iloc[-2]) / data["Close"].iloc[-2]) * 100 if len(data) > 1 else 0
         price_change_5d = ((close_price - data["Close"].iloc[-6]) / data["Close"].iloc[-6]) * 100 if len(data) > 5 else 0
+        price_change_20d = ((close_price - data["Close"].iloc[-21]) / data["Close"].iloc[-21]) * 100 if len(data) > 20 else 0
         
         # Volume analysis
         avg_volume = data["Volume"].tail(20).mean()
         current_volume = data["Volume"].iloc[-1]
         volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1
+        
+        # Volatility (ATR as % of price)
+        volatility = (indicators['ATR'] / close_price) * 100 if close_price > 0 else 0
         
         # Get company info
         company_name = info.get('longName', symbol)
@@ -239,10 +307,11 @@ def analyze_single_stock(symbol, period, ticker_info_dict):
             "Price": round(close_price, 2),
             "1D Change %": round(price_change_1d, 2),
             "5D Change %": round(price_change_5d, 2),
+            "20D Change %": round(price_change_20d, 2),
             "Volume Ratio": round(volume_ratio, 2),
+            "Volatility %": round(volatility, 2),
             "RSI": round(indicators['RSI'], 1),
             "MACD": round(indicators['MACD'], 4),
-            "ADX": round(indicators['ADX'], 1),
             "Market Cap": market_cap,
             "P/E": round(pe_ratio, 2) if pe_ratio else "N/A",
             "Signals": ", ".join(signals[:3]),  # Top 3 signals
@@ -307,22 +376,12 @@ if st.sidebar.button("Clear Cache & Restart"):
 current_settings_hash = create_settings_hash(selected_sector, selected_period, max_stocks, min_volume)
 settings_changed = st.session_state.scan_settings_hash != current_settings_hash
 
-# Filter tickers by sector and volume
+# Filter tickers by sector
 if selected_sector != "All":
     filtered_info = ticker_info[ticker_info["GICS Sector"] == selected_sector]
     analysis_tickers = filtered_info["Symbol"].tolist()[:max_stocks]
 else:
     analysis_tickers = tickers[:max_stocks]
-
-# Pre-filter by volume (cached)
-if st.sidebar.checkbox("Enable Volume Pre-filtering", value=True):
-    st.sidebar.write("🔍 Pre-filtering by volume...")
-    volume_filtered_tickers = []
-    for ticker in analysis_tickers[:50]:  # Check first 50 for demo
-        avg_vol = get_stock_volume_data(ticker)
-        if avg_vol >= min_volume * 1_000_000:
-            volume_filtered_tickers.append(ticker)
-    analysis_tickers = volume_filtered_tickers + analysis_tickers[50:]  # Keep rest for full analysis
 
 # Display current scan status
 if st.session_state.scan_status != "Ready":
@@ -439,7 +498,7 @@ if start_scan or resume_scan:
                                     except:
                                         return ''
                                 
-                                styled_df = filtered_df.style.applymap(color_score, subset=['AI Score']).applymap(color_change, subset=['1D Change %', '5D Change %'])
+                                styled_df = filtered_df.style.applymap(color_score, subset=['AI Score']).applymap(color_change, subset=['1D Change %', '5D Change %', '20D Change %'])
                                 st.dataframe(styled_df, use_container_width=True, height=400)
                             else:
                                 st.info(f"⏳ Analyzing... {completed_count} stocks processed. No stocks found yet with score ≥ {min_score}")
@@ -497,7 +556,7 @@ if st.session_state.scanner_results:
             except:
                 return ''
         
-        styled_df = df_filtered.style.applymap(color_score, subset=['AI Score']).applymap(color_change, subset=['1D Change %', '5D Change %'])
+        styled_df = df_filtered.style.applymap(color_score, subset=['AI Score']).applymap(color_change, subset=['1D Change %', '5D Change %', '20D Change %'])
         st.dataframe(styled_df, use_container_width=True, height=600)
         
         # Advanced analytics
@@ -514,10 +573,10 @@ if st.session_state.scanner_results:
                 st.plotly_chart(fig_pie, use_container_width=True)
             
             with col2:
-                # Score vs Volume correlation
-                fig_scatter = px.scatter(df_filtered, x="Volume Ratio", y="AI Score", 
-                                       color="Sector", size="Market Cap",
-                                       title="AI Score vs Volume Activity",
+                # Score vs Performance correlation
+                fig_scatter = px.scatter(df_filtered, x="20D Change %", y="AI Score", 
+                                       color="Sector", size="Volume Ratio",
+                                       title="AI Score vs 20-Day Performance",
                                        hover_data=["Symbol", "Company"])
                 st.plotly_chart(fig_scatter, use_container_width=True)
         
@@ -544,7 +603,7 @@ if st.session_state.scanner_results:
         with col3:
             # Quick stats
             st.metric("🔥 Best Score", f"{df_filtered['AI Score'].max()}")
-            st.metric("📈 Avg 5D Change", f"{df_filtered['5D Change %'].mean():.1f}%")
+            st.metric("📈 Avg 20D Change", f"{df_filtered['20D Change %'].mean():.1f}%")
             
     else:
         st.warning(f"No stocks found with AI Score ≥ {min_score}. Try lowering the minimum score.")
@@ -552,96 +611,3 @@ if st.session_state.scanner_results:
         # Show top 10 regardless of score
         st.subheader("🔍 Top 10 Stocks (All Scores)")
         top_10 = df_results.sort_values("AI Score", ascending=False).head(10)
-        st.dataframe(top_10, use_container_width=True)
-
-else:
-    # Initial state - show instructions
-    st.markdown("""
-    ## 🎯 Multi-Threaded AI Scanner Features
-    
-    ### ⚡ **NEW: Enhanced Performance**
-    - **Multi-threading**: Analyze multiple stocks simultaneously
-    - **Real-time updates**: See results every 10 stocks
-    - **Resume capability**: Continue interrupted scans
-    - **Volume pre-filtering**: Skip low-volume stocks
-    - **Smart caching**: Faster repeated analyses
-    
-    ### 🛠️ **How to Use**
-    
-    1. **Configure Settings**:
-       - AI Score threshold (6-8 recommended)
-       - Sector filter (optional)
-       - Analysis period
-       - Volume minimum (1M+ recommended)
-       - Concurrent workers (10 = balanced)
-    
-    2. **Start Analysis**: Click "Start Multi-Threaded AI Analysis"
-    
-    3. **Monitor Progress**: Watch real-time results appear
-    
-    4. **Resume if Needed**: Use "Resume Scan" for interrupted scans
-    
-    ### 🎛️ **Performance Tips**
-    - **For speed**: 10-15 workers, 100-200 stocks
-    - **For stability**: 5-8 workers, volume filter enabled
-    - **For completeness**: 500 stocks with 8+ workers
-    
-    ### 🧠 **AI Scoring Enhanced**
-    - Multiple timeframe analysis
-    - Volume-weighted signals
-    - Sector-relative scoring
-    - Market condition adjustments
-    
-    **🚀 Ready to scan? Configure your settings and start!**
-    """)
-    
-    # Market overview with caching
-    st.subheader("📈 Market Overview")
-    
-    @st.cache_data(ttl=300)  # Cache for 5 minutes
-    def get_market_indices():
-        indices = {
-            "S&P 500": "^GSPC",
-            "NASDAQ": "^IXIC", 
-            "Dow Jones": "^DJI",
-            "VIX": "^VIX"
-        }
-        
-        index_data = []
-        for name, symbol in indices.items():
-            try:
-                ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="2d")
-                if not hist.empty:
-                    current = hist["Close"].iloc[-1]
-                    previous = hist["Close"].iloc[-2] if len(hist) > 1 else current
-                    change = ((current - previous) / previous) * 100
-                    index_data.append({
-                        "Index": name,
-                        "Price": round(current, 2),
-                        "Change %": round(change, 2)
-                    })
-            except:
-                continue
-        return index_data
-    
-    market_data = get_market_indices()
-    if market_data:
-        df_indices = pd.DataFrame(market_data)
-        
-        # Color code market data
-        def color_market_change(val):
-            try:
-                val = float(val)
-                return 'color: green; font-weight: bold' if val > 0 else 'color: red; font-weight: bold' if val < 0 else 'color: gray'
-            except:
-                return ''
-        
-        styled_indices = df_indices.style.applymap(color_market_change, subset=['Change %'])
-        st.dataframe(styled_indices, use_container_width=True)
-
-# Footer
-st.markdown("---")
-st.markdown("**Mozes Super-AI Scanner v2.0** - Multi-Threaded Technical Analysis 🚀")
-st.markdown("*Enhanced with real-time updates, resume capability, and advanced filtering*")
-st.markdown("*Disclaimer: For educational purposes only. Always do your own research.*")
