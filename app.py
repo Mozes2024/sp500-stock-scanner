@@ -6,7 +6,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="📈 S&P 500 Scanner", layout="wide")
-st.title("🤖 Mozes Super-AI Scanner")
+st.title("🤖 Mozes Super-AI Scanner [DEBUG MODE]")
 
 @st.cache_data(ttl=86400)
 def load_sp500():
@@ -99,17 +99,24 @@ def scan_stocks_parallel(min_score, sector_filter):
         sp500 = sp500[sp500["GICS Sector"] == sector_filter]
 
     results = []
+debug_logs = []
     print(f"Scanning {len(sp500)} stocks with min_score={min_score}")
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(scan_symbol, row, min_score) for _, row in sp500.iterrows()]
         for future in futures:
             result = future.result()
             if result:
+                if isinstance(result, dict):
+                    results.append(result)
+                elif isinstance(result, tuple):
+                    results.append(result[0])
+                    debug_logs.extend(result[1])
                 results.append(result)
 
     df = pd.DataFrame(results)
     if df.empty:
         return df
+    st.session_state['debug_logs'] = debug_logs
     return df.sort_values(by="Score", ascending=False)
 
 # UI Sidebar
@@ -139,3 +146,9 @@ if not df_result.empty:
             st.markdown(f"[💹 Investing](https://il.investing.com/search?q={row['Symbol']})")
 else:
     st.warning("😕 לא נמצאו מניות שעוברות את הסינון.")
+
+# Display skipped stocks (debug)
+st.markdown("### 🐞 דיאגנוסטיקה (Debug)")
+if 'debug_logs' in st.session_state:
+    for log in st.session_state['debug_logs']:
+        st.text(log)
