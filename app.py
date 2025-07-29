@@ -1,175 +1,129 @@
+
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import ta
 import requests
+import datetime
+import pandas_ta as ta
 from concurrent.futures import ThreadPoolExecutor
 
-st.set_page_config(page_title="🤖 Mozes Super-AI Scanner", layout="wide")
-st.title("🤖 Mozes Super-AI Scanner [FIXED INDICATORS]")
-
-@st.cache_data(ttl=86400)
-def load_sp500():
-    df = pd.read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")[0]
-    return df[['Symbol', 'Security', 'GICS Sector']]
+st.set_page_config(layout="wide")
+st.title("📈 Mozes Super-AI Scanner")
 
 @st.cache_data(ttl=3600)
-def fetch_tipranks_data(ticker):
+def load_sp500():
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    df = pd.read_html(url)[0]
+    return df[["Symbol", "Security", "GICS Sector"]].rename(columns={"Symbol": "Ticker", "Security": "Name", "GICS Sector": "Sector"})
+
+@st.cache_data(ttl=3600)
+def get_tipranks_data(ticker):
     try:
         url = f"https://mobile.tipranks.com/api/stocks/stockAnalysisOverview?tickers={ticker}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            data = r.json()[0]
-            price = data.get("price", 0)
-            target = data.get("priceTarget", 0)
-            diff = round(((target - price) / price) * 100, 2) if price else None
-            return data.get("smartScore"), data.get("analystConsensus"), diff
-        return None, None, None
-    except:
-        return None, None, None
+        response = requests.get(url, timeout=5)
+        data = response.json()
+        if ticker in data:
+            return {
+                "SmartScore": data[ticker].get("smartScore", None),
+                "PriceTarget %": data[ticker].get("priceTarget", {}).get("percentageChange", None),
+                "AnalystConsensus": data[ticker].get("analystConsensus", None),
+            }
+    except Exception:
+        return {}
+    return {}
 
-def scan_symbol(row, min_score):
-    symbol = row['Symbol']
-    name = row['Security']
-    sector = row['GICS Sector']
-    debug_info = []
+def analyze_stock(symbol):
     try:
-        df = yf.download(symbol, period="6mo", interval="1d", progress=False, auto_adjust=False)
+        df = yf.download(symbol, period='6mo', interval='1d', progress=False)
         if df.empty or len(df) < 50:
-            debug_info.append(f"{symbol} skipped - insufficient data")
-            return None, debug_info
+            return None
 
-        # Assure 1D columns
-        df["Open"] = df["Open"].squeeze()
-        df["High"] = df["High"].squeeze()
-        df["Low"] = df["Low"].squeeze()
-        df["Close"] = df["Close"].squeeze()
-        df["Volume"] = df["Volume"].squeeze()
-
+        # Ensure 1D arrays for indicators
         open_ = df["Open"].squeeze()
         high = df["High"].squeeze()
         low = df["Low"].squeeze()
         close = df["Close"].squeeze()
         volume = df["Volume"].squeeze()
-        df = ta.add_all_ta_features(df, open=open_, high=high, low=low, close=close, volume=volume)
-        close = df["Close"].iloc[-1]
+
+        df = ta.add_all_ta_features(df, open=open_, high=high, low=low, close=close, volume=volume, fillna=True)
+
         score = 0
         signals = []
 
-        # Check necessary indicators
-        if pd.isna(df['trend_ema_fast'].iloc[-1]) or pd.isna(df['trend_ema_slow'].iloc[-1]):
-            debug_info.append(f"{symbol} skipped - missing EMA")
-            return None, debug_info
-        if pd.isna(df['momentum_rsi'].iloc[-1]) or pd.isna(df['trend_macd'].iloc[-1]):
-            debug_info.append(f"{symbol} skipped - missing RSI/MACD")
-            return None, debug_info
-
-        if close > df['trend_ema200'].iloc[-1]:
+        if df["trend_macd_diff"].iloc[-1] > 0:
             score += 1
-            signals.append("Price > EMA200")
-        if df['trend_ema_fast'].iloc[-1] > df['trend_ema_slow'].iloc[-1]:
+            signals.append("MACD Bullish")
+        if df["trend_ema_fast"].iloc[-1] > df["trend_ema_slow"].iloc[-1]:
             score += 1
-            signals.append("EMA20 > EMA50")
-        rsi = df['momentum_rsi'].iloc[-1]
-        if 50 < rsi < 70:
+            signals.append("EMA Crossover")
+        if df["momentum_rsi"].iloc[-1] < 70 and df["momentum_rsi"].iloc[-1] > 50:
             score += 1
-            signals.append("RSI 50-70")
-        if df['trend_macd'].iloc[-1] > 0:
+            signals.append("RSI Moderate")
+        if df["momentum_stoch"].iloc[-1] < 80 and df["momentum_stoch"].iloc[-1] > 20:
             score += 1
-            signals.append("MACD > 0")
-        if df['trend_psar_up'].iloc[-1] < close:
+            signals.append("Stoch OK")
+        if df["volatility_bbm"].iloc[-1] < df["Close"].iloc[-1] < df["volatility_bbu"].iloc[-1]:
             score += 1
-            signals.append("PSAR Bullish")
-        if df['momentum_stoch'].iloc[-1] > 50:
-            score += 1
-            signals.append("Stochastic > 50")
-        if df['momentum_wr'].iloc[-1] > -80:
-            score += 1
-            signals.append("Williams %R > -80")
-        if df['momentum_cci'].iloc[-1] > 0:
-            score += 1
-            signals.append("CCI > 0")
-        if df['trend_adx'].iloc[-1] > 20:
-            score += 1
-            signals.append("ADX > 20")
-
-        if score < min_score:
-            debug_info.append(f"{symbol} skipped - score too low")
-            return None, debug_info
-
-        marketcap = round(yf.Ticker(symbol).info.get("marketCap", 0) / 1e9, 2)
-        smart, consensus, target_diff = fetch_tipranks_data(symbol)
+            signals.append("Inside Bollinger")
 
         return {
             "Symbol": symbol,
-            "Company": name,
-            "Sector": sector,
-            "Market Cap ($B)": marketcap,
             "Score": score,
-            "Matching Signals": ", ".join(signals),
-            "SmartScore": smart,
-            "AnalystConsensus": consensus,
-            "PriceTargetPercent": target_diff
-        }, debug_info
+            "Signals": ", ".join(signals)
+        }
     except Exception as e:
-        debug_info.append(f"{symbol} skipped - exception: {type(e).__name__} - {e}")
-        return None, debug_info
+        return {"Symbol": symbol, "Error": f"{type(e).__name__} - {e}"}
 
-@st.cache_data
-def scan_stocks_parallel(min_score, sector_filter):
+@st.cache_data(ttl=1800)
+def scan_stocks(min_score=3, sector_filter=None):
     sp500 = load_sp500()
     if sector_filter != "All":
-        sp500 = sp500[sp500["GICS Sector"] == sector_filter]
+        sp500 = sp500[sp500["Sector"] == sector_filter]
 
     results = []
-    debug_logs = []
+    debug_info = []
+
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(scan_symbol, row, min_score) for _, row in sp500.iterrows()]
+        futures = {executor.submit(analyze_stock, row["Ticker"]): row for _, row in sp500.iterrows()}
         for future in futures:
             result = future.result()
             if result:
-                record, debug = result
-                if record:
-                    results.append(record)
-                debug_logs.extend(debug)
+                if "Error" in result:
+                    debug_info.append(f"{result['Symbol']} skipped - exception: {result['Error']}")
+                elif result["Score"] >= min_score:
+                    meta = futures[future]
+                    tip_data = get_tipranks_data(result["Symbol"]) or {}
+                    results.append({
+                        "Symbol": result["Symbol"],
+                        "Name": meta["Name"],
+                        "Sector": meta["Sector"],
+                        "Score": result["Score"],
+                        "Signals": result["Signals"],
+                        **tip_data
+                    })
 
-    st.session_state['debug_logs'] = debug_logs
-    df = pd.DataFrame(results)
-    if df.empty:
-        return df
-    return df.sort_values(by="Score", ascending=False)
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False), debug_info
 
-# UI Sidebar
-st.sidebar.header("פילטרים")
-min_score = st.sidebar.slider("מינימום אינדיקטורים חיוביים", 0, 10, 4)
-sectors = ["All"] + sorted(load_sp500()["GICS Sector"].unique().tolist())
-sector_choice = st.sidebar.selectbox("בחר סקטור", sectors)
+# Sidebar controls
+min_score = st.sidebar.slider("Minimum Score", 0, 5, 3)
+sectors = ["All"] + sorted(load_sp500()["Sector"].unique())
+sector_choice = st.sidebar.selectbox("Filter by Sector", sectors)
 
-# Scan and display
-with st.spinner("🔍 סורק את מניות ה-S&P500..."):
-    df_result = scan_stocks_parallel(min_score, sector_choice)
+df_result, debug_output = scan_stocks(min_score=min_score, sector_filter=sector_choice)
 
-st.markdown("### 📊 תוצאות סריקה:")
 if not df_result.empty:
-    for i, row in df_result.iterrows():
-        with st.expander(f"🔹 {row['Symbol']} – {row['Company']}"):
-            st.markdown(f"**סקטור:** {row['Sector']}")
-            st.markdown(f"**שווי שוק:** {row['Market Cap ($B)']} מיליארד דולר")
-            st.markdown(f"**ציון אינדיקטורים:** {row['Score']}")
-            st.markdown(f"**התאמות:** {row['Matching Signals']}")
-            st.markdown(f"**TipRanks SmartScore:** {row['SmartScore']}")
-            st.markdown(f"**המלצת אנליסטים:** {row['AnalystConsensus']}")
-            st.markdown(f"**פער יעד ↑:** {row['PriceTargetPercent']}%")
-            st.markdown("**🔗 קישורים חיצוניים:**")
-            st.markdown(f"[📈 TipRanks](https://www.tipranks.com/stocks/{row['Symbol']})")
-            st.markdown(f"[📊 TradingView](https://il.tradingview.com/chart/SWXo0urZ/?symbol={row['Symbol']})")
-            st.markdown(f"[💹 Investing](https://il.investing.com/search?q={row['Symbol']})")
-else:
-    st.warning("😕 לא נמצאו מניות שעוברות את הסינון.")
+    def make_link(symbol):
+        tip = f"https://www.tipranks.com/stocks/{symbol}"
+        tv = f"https://il.tradingview.com/chart/?symbol={symbol}"
+        inv = f"https://il.investing.com/search?q={symbol}"
+        return f"[{symbol}]({tip}) | [TV]({tv}) | [INV]({inv})"
 
-# Debug output
-st.markdown("### 🐞 דיאגנוסטיקה (Debug)")
-if 'debug_logs' in st.session_state:
-    for log in st.session_state['debug_logs']:
-        st.text(log)
+    df_result["Links"] = df_result["Symbol"].apply(make_link)
+    df_result_display = df_result[["Links", "Name", "Sector", "Score", "Signals", "SmartScore", "PriceTarget %", "AnalystConsensus"]]
+    st.dataframe(df_result_display, use_container_width=True)
+else:
+    st.warning("No stocks matched your filters.")
+
+with st.expander("🐞 דיאגנוסטיקה (Debug)"):
+    st.text("
+".join(debug_output))
