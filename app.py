@@ -6,7 +6,8 @@ import plotly.express as px
 import numpy as np
 from datetime import datetime, timedelta
 import time
-from concurrent.futures import ThreadPoolExecutor # Removed threading import as it's not needed directly with st.status
+# התיקון כאן: הוספת as_completed בחזרה לייבוא
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import hashlib
 
@@ -69,7 +70,7 @@ st.markdown("""
 def load_sp500_symbols():
     try:
         # ננסה לטעון מהאינטרנט
-        table = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P%20500_companies')
+        table = pd.read_html('https://en.wikipedia.org/wiki/List_of_S%26P_500_companies')
         df = table[0]
         symbols = df['Symbol'].tolist()
         
