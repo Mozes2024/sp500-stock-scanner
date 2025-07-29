@@ -47,7 +47,12 @@ def scan_symbol(row, min_score):
         df["Close"] = df["Close"].squeeze()
         df["Volume"] = df["Volume"].squeeze()
 
-        df = ta.add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume")
+        open_ = df["Open"].squeeze()
+        high = df["High"].squeeze()
+        low = df["Low"].squeeze()
+        close = df["Close"].squeeze()
+        volume = df["Volume"].squeeze()
+        df = ta.add_all_ta_features(df, open=open_, high=high, low=low, close=close, volume=volume)
         close = df["Close"].iloc[-1]
         score = 0
         signals = []
