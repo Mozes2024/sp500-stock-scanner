@@ -125,5 +125,5 @@ else:
     st.warning("No stocks matched your filters.")
 
 with st.expander("🐞 דיאגנוסטיקה (Debug)"):
-    st.text("
+st.text("")
 ".join(debug_output))
