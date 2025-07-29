@@ -1,12 +1,8 @@
 streamlit
 yfinance
 pandas
-pandas_ta==0.3.14b0
+pandas_ta
 requests
 openpyxl
 lxml
-numpy>=1.25.0
-plotly
-scikit-learn
-setuptools
-talib-binary
+numpy
