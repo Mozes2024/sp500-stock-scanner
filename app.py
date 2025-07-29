@@ -4,8 +4,8 @@ import yfinance as yf
 import ta
 import requests
 
-st.set_page_config(page_title="馃搱 S&P 500 Scanner", layout="wide")
-st.title("馃搱 住讜专拽 诪谞讬讜转 S&P 500 注诐 讗讬谞讚讬拽讟讜专讬诐 砖讜专讬讬诐 讜-TipRanks")
+st.set_page_config(page_title="📈 S&P 500 Scanner", layout="wide")
+st.title("📈 סורק מניות S&P 500 עם אינדיקטורים שוריים ו-TipRanks")
 
 @st.cache_data
 def load_sp500():
@@ -101,31 +101,31 @@ def scan_stocks(min_score, sector_filter):
     return pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
 # Sidebar filters
-st.sidebar.header("驻讬诇讟专讬诐")
-min_score = st.sidebar.slider("诪讬谞讬诪讜诐 讗讬谞讚讬拽讟讜专讬诐 讞讬讜讘讬讬诐", 0, 10, 4)
+st.sidebar.header("פילטרים")
+min_score = st.sidebar.slider("מינימום אינדיקטורים חיוביים", 0, 10, 4)
 sp500 = load_sp500()
 sectors = ["All"] + sorted(sp500["GICS Sector"].unique().tolist())
-sector_choice = st.sidebar.selectbox("讘讞专 住拽讟讜专", sectors)
+sector_choice = st.sidebar.selectbox("בחר סקטור", sectors)
 
 # Run scan
-with st.spinner("馃攳 住讜专拽 讗转 诪谞讬讜转 讛-S&P500..."):
+with st.spinner("🔍 סורק את מניות ה-S&P500..."):
     df_result = scan_stocks(min_score, sector_choice)
 
 # Show results
-st.markdown("### 馃搳 转讜爪讗讜转 住专讬拽讛:")
+st.markdown("### 📊 תוצאות סריקה:")
 if not df_result.empty:
     for i, row in df_result.iterrows():
-        with st.expander(f"馃敼 {row['Symbol']} 鈥?{row['Company']}"):
-            st.markdown(f"**住拽讟讜专:** {row['Sector']}")
-            st.markdown(f"**砖讜讜讬 砖讜拽:** {row['Market Cap ($B)']} 诪讬诇讬讗专讚 讚讜诇专")
-            st.markdown(f"**爪讬讜谉 讗讬谞讚讬拽讟讜专讬诐:** {row['Score']}")
-            st.markdown(f"**讛转讗诪讜转:** {row['Matching Signals']}")
+        with st.expander(f"🔹 {row['Symbol']} – {row['Company']}"):
+            st.markdown(f"**סקטור:** {row['Sector']}")
+            st.markdown(f"**שווי שוק:** {row['Market Cap ($B)']} מיליארד דולר")
+            st.markdown(f"**ציון אינדיקטורים:** {row['Score']}")
+            st.markdown(f"**התאמות:** {row['Matching Signals']}")
             st.markdown(f"**TipRanks SmartScore:** {row['SmartScore']}")
-            st.markdown(f"**讛诪诇爪转 讗谞诇讬住讟讬诐:** {row['AnalystConsensus']}")
-            st.markdown(f"**驻注专 讬注讚 鈫?** {row['PriceTargetPercent']}%")
-            st.markdown("**馃敆 拽讬砖讜专讬诐 讞讬爪讜谞讬讬诐:**")
-            st.markdown(f"[馃搱 TipRanks](https://www.tipranks.com/stocks/{row['Symbol']})")
-            st.markdown(f"[馃搳 TradingView](https://il.tradingview.com/chart/SWXo0urZ/?symbol={row['Symbol']})")
-            st.markdown(f"[馃捁 Investing](https://il.investing.com/search?q={row['Symbol']})")
+            st.markdown(f"**המלצת אנליסטים:** {row['AnalystConsensus']}")
+            st.markdown(f"**פער יעד ↑:** {row['PriceTargetPercent']}%")
+            st.markdown("**🔗 קישורים חיצוניים:**")
+            st.markdown(f"[📈 TipRanks](https://www.tipranks.com/stocks/{row['Symbol']})")
+            st.markdown(f"[📊 TradingView](https://il.tradingview.com/chart/SWXo0urZ/?symbol={row['Symbol']})")
+            st.markdown(f"[💹 Investing](https://il.investing.com/search?q={row['Symbol']})")
 else:
-    st.warning("馃槙 诇讗 谞诪爪讗讜 诪谞讬讜转 砖注讜讘专讜转 讗转 讛住讬谞讜谉.")
+    st.warning("😕 לא נמצאו מניות שעוברות את הסינון.")
