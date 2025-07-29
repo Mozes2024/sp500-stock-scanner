@@ -6,7 +6,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(page_title="📈 S&P 500 Scanner", layout="wide")
-st.title("📈 סורק מניות S&P 500 עם אינדיקטורים שוריים ו-TipRanks")
+st.title("🤖 Mozes Super-AI Scanner")
 
 @st.cache_data(ttl=86400)
 def load_sp500():
@@ -99,6 +99,7 @@ def scan_stocks_parallel(min_score, sector_filter):
         sp500 = sp500[sp500["GICS Sector"] == sector_filter]
 
     results = []
+    print(f"Scanning {len(sp500)} stocks with min_score={min_score}")
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(scan_symbol, row, min_score) for _, row in sp500.iterrows()]
         for future in futures:
