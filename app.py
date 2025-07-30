@@ -383,6 +383,22 @@ if st.session_state.scanner_results:
     df_results['SmartScore'] = df_results['SmartScore'].fillna(np.nan)
     df_results['PriceTarget %↑'] = df_results['PriceTarget %↑'].fillna(np.nan)
 
+    # הגדרת סדר העמודות מחוץ לבלוק התנאי
+    desired_columns_order = [
+        "Symbol",
+        "Company",
+        "Sector",
+        "Market Cap",
+        "AI Score",
+        "Matching Signals",
+        "SmartScore",
+        "AnalystConsensus",
+        "PriceTarget %↑",
+        "Current Price",
+        "20D Change %",
+        "Average Volume"
+    ]
+
     # סינון
     all_sectors_from_data = sorted(list(set([s for s in df_results['Sector'].unique() if s != 'לא ידוע'])))
     selected_sectors = st.sidebar.multiselect("סנן לפי סקטור:", all_sectors_from_data, default=all_sectors_from_data)
@@ -405,22 +421,6 @@ if st.session_state.scanner_results:
     if not df_filtered.empty:
         df_filtered = df_filtered.sort_values(by="AI Score", ascending=False).reset_index(drop=True)
 
-        # שינוי סדר העמודות
-        desired_columns_order = [
-            "Symbol",
-            "Company",
-            "Sector",
-            "Market Cap",
-            "AI Score",
-            "Matching Signals",
-            "SmartScore",
-            "AnalystConsensus",
-            "PriceTarget %↑",
-            "Current Price",
-            "20D Change %",
-            "Average Volume"
-        ]
-        
         final_columns = [col for col in desired_columns_order if col in df_filtered.columns]
         for col in df_filtered.columns:
             if col not in final_columns and col not in ["Historical Data", "TipRanks_URL", "Industry"]:
