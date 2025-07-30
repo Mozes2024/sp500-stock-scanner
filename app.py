@@ -102,7 +102,11 @@ def get_tipranks_data(symbol):
         "SmartScore": np.nan,
         "AnalystConsensus": "לא זמין",
         "PriceTarget %↑": np.nan,
-        "TipRanks_URL": f"https://www.tipranks.com/stocks/{symbol}"
+        "TipRanks_URL": f"https://www.tipranks.com/stocks/{symbol}",
+        "HedgeFundTrend": "לא זמין",
+        "InsiderTrend": "לא זמין",
+        "NewsSentiment": "לא זמין",
+        "BloggerConsensus": "לא זמין"
     }
     try:
         url = f"https://mobile.tipranks.com/api/stocks/stockAnalysisOverview?tickers={symbol}"
@@ -117,28 +121,38 @@ def get_tipranks_data(symbol):
             stock_info = data[0]
             
             # Smart Score
-            smart_score = stock_info.get('smartScore', {}).get('score', np.nan)
-            if smart_score:
+            smart_score = stock_info.get('smartScore', np.nan)
+            if pd.notna(smart_score):
                 tipranks_data["SmartScore"] = smart_score
             
-            # Analyst Consensus and Price Target
-            analyst_data = stock_info.get('analystConsensus', {})
-            tipranks_data["AnalystConsensus"] = analyst_data.get('consensus', 'לא זמין')
-
-            price_target_obj = analyst_data.get('priceTarget', {})
+            # Analyst Consensus
+            analyst_consensus = stock_info.get('analystConsensus', 'לא זמין')
+            if analyst_consensus and analyst_consensus != 'לא זמין':
+                tipranks_data["AnalystConsensus"] = analyst_consensus
+            
+            # Price Target
+            price_target_obj = stock_info.get('priceTarget', {})
             current_price_from_tipranks = price_target_obj.get('price', np.nan)
             target_price = price_target_obj.get('target', np.nan)
-            
             if pd.notna(current_price_from_tipranks) and pd.notna(target_price) and current_price_from_tipranks != 0:
                 price_target_percentage = ((target_price - current_price_from_tipranks) / current_price_from_tipranks) * 100
                 tipranks_data["PriceTarget %↑"] = price_target_percentage
+            
+            # Additional Fields
+            tipranks_data["HedgeFundTrend"] = stock_info.get('hedgeFundTrend', 'לא זמין')
+            tipranks_data["InsiderTrend"] = stock_info.get('insiderTrend', 'לא זמין')
+            tipranks_data["NewsSentiment"] = stock_info.get('newsSentiment', 'לא זמין')
+            tipranks_data["BloggerConsensus"] = stock_info.get('bloggerConsensus', 'לא זמין')
 
-    except requests.exceptions.RequestException:
-        pass
-    except json.JSONDecodeError:
-        pass
-    except Exception:
-        pass
+        else:
+            st.warning(f"לא התקבלו נתונים מ-TipRanks עבור {symbol}. בדוק את ה-URL: {tipranks_data['TipRanks_URL']}")
+    except requests.exceptions.RequestException as e:
+        st.warning(f"שגיאת חיבור ל-TipRanks עבור {symbol}: {e}")
+    except json.JSONDecodeError as e:
+        st.error(f"שגיאה בפריסת JSON עבור {symbol}: {e}")
+    except Exception as e:
+        st.error(f"שגיאה לא צפויה ב-TipRanks עבור {symbol}: {e}")
+    
     return tipranks_data
 
 # פונקציה לקבלת נתונים למניה בודדת (Yfinance + Indicators + TipRanks)
@@ -148,6 +162,7 @@ def get_stock_data(symbol, start_date, end_date):
         history = ticker.history(start=start_date, end=end_date, interval="1d")
         
         if history.empty:
+            st.warning(f"נתונים חסרים עבור {symbol} מ-yfinance.")
             return None
         
         # קבלת מידע בסיסי מ-yfinance
@@ -249,10 +264,15 @@ def get_stock_data(symbol, start_date, end_date):
             "SmartScore": tipranks_data["SmartScore"],
             "AnalystConsensus": tipranks_data["AnalystConsensus"],
             "PriceTarget %↑": tipranks_data["PriceTarget %↑"],
+            "HedgeFundTrend": tipranks_data["HedgeFundTrend"],
+            "InsiderTrend": tipranks_data["InsiderTrend"],
+            "NewsSentiment": tipranks_data["NewsSentiment"],
+            "BloggerConsensus": tipranks_data["BloggerConsensus"],
             "TipRanks_URL": tipranks_data["TipRanks_URL"],
             "Historical Data": history
         }
-    except Exception:
+    except Exception as e:
+        st.error(f"שגיאה בעת עיבוד {symbol}: {e}")
         return None
 
 # פונקציית סריקה ראשית המשתמשת ב-st.status
@@ -394,6 +414,10 @@ if st.session_state.scanner_results:
         "SmartScore",
         "AnalystConsensus",
         "PriceTarget %↑",
+        "HedgeFundTrend",
+        "InsiderTrend",
+        "NewsSentiment",
+        "BloggerConsensus",
         "Current Price",
         "20D Change %",
         "Average Volume"
